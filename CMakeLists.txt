@@ -4,9 +4,10 @@ project(rebulid VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick SerialPort TextToSpeech)
-
-find_package(Qt6 REQUIRED COMPONENTS Quick WebEngineQuick)
+# TextToSpeech is optional: it is not included in every Qt installation.
+# The application supplies a no-op QML-compatible fallback when unavailable.
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick SerialPort WebEngineQuick)
+find_package(Qt6TextToSpeech QUIET CONFIG)
 
 
 
@@ -51,7 +52,13 @@ target_link_libraries(apprebulid
 )
 target_link_libraries(apprebulid PRIVATE Qt6::Quick Qt6::WebEngineQuick)
 
-target_link_libraries(apprebulid PRIVATE Qt6::TextToSpeech)
+if(TARGET Qt6::TextToSpeech)
+    target_link_libraries(apprebulid PRIVATE Qt6::TextToSpeech)
+    target_compile_definitions(apprebulid PRIVATE REBULID_HAS_TEXT_TO_SPEECH=1)
+else()
+    message(WARNING "Qt TextToSpeech was not found; speech feedback is disabled.")
+    target_compile_definitions(apprebulid PRIVATE REBULID_HAS_TEXT_TO_SPEECH=0)
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS apprebulid
