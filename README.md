@@ -38,4 +38,4 @@ This software can interact with unmanned aircraft. Keep propellers clear, use a 
 
 ## License
 
-No project license has been selected yet. Add a license before accepting external contributions or distributing releases.
+This project is licensed under the [MIT License](LICENSE).
