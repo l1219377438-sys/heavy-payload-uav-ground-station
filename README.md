@@ -1,6 +1,6 @@
-# rebulid
+# heavy-payload-uav-ground-station
 
-`rebulid` is a Qt 6 desktop ground-control application for MAVLink-compatible drones. It includes serial-port communication, mission planning, RTK/NTRIP configuration, telemetry parsing, attitude display, speech feedback, and multi-drone formation controls.
+`heavy-payload-uav-ground-station` is a Qt 6 desktop ground-control application for MAVLink-compatible drones. It includes serial-port communication, mission planning, RTK/NTRIP configuration, telemetry parsing, attitude display, speech feedback, and multi-drone formation controls.
 
 > This is an experimental project. Validate every command in a safe test environment before using it with an aircraft.
 
