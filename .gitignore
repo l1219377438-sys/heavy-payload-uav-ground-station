@@ -1,0 +1,46 @@
+# CMake build trees
+/build/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+_deps/
+
+# Qt Creator user-specific settings
+*.user
+*.user.*
+*.creator.user
+*.creator.user.*
+*.qtc_clangd/
+*.qmlproject.user
+
+# Generated binaries and Qt artifacts
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.lib
+*.qmlc
+*.jsc
+*.rcc
+*.prl
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini
