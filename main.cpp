@@ -3,6 +3,9 @@
 #include <QQmlContext>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #include <QWebChannel>
+#include <QDir>
+#include <QFileInfo>
+#include "localmapserver.h"
 
 
 
@@ -27,7 +30,21 @@ int main(int argc, char *argv[])
 
     QtWebEngineQuick::initialize();
 
+    // Listen before QML loads the page. No Python process or console window needed.
+    LocalMapServer mapServer;
+    const QString externalMap = QDir(QCoreApplication::applicationDirPath()).filePath("gaode.html");
+    const QString mapPath = QFileInfo::exists(externalMap) ? externalMap : QStringLiteral(":/map/gaode.html");
+    QString mapServerError;
+    if (!mapServer.start(mapPath)) {
+        mapServerError = QStringLiteral("地图服务启动失败，请检查 gaode.html 是否可读并重启程序。");
+        qWarning() << mapServerError << mapServer.errorString();
+    } else {
+        qInfo() << "[Map]" << mapServer.pageUrl();
+    }
+
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("mapPageUrl", mapServer.pageUrl());
+    engine.rootContext()->setContextProperty("mapServerError", mapServerError);
 
 
     // 注册 供 QML 中使用

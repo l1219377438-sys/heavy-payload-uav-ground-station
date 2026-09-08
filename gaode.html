@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>无人机地面站 · 高德地图</title>
+    <style>
+        * { box-sizing: border-box; }
+        html, body, #map { width: 100%; height: 100%; margin: 0; }
+        body { font: 13px "Microsoft YaHei", sans-serif; background: #e8edf0; color: #183148; }
+        #tools { position: absolute; top: 28px; right: 12px; width: 236px; max-width: calc(100% - 24px); padding: 10px; border-radius: 8px; background: rgba(255,255,255,.95); box-shadow: 0 2px 12px #18314825; }
+        @media (max-width: 900px) { #tools { top: 135px; } }
+        summary { cursor: pointer; font-weight: bold; }
+        .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+        button, select { font: inherit; padding: 5px 7px; border: 1px solid #b9c9d5; background: white; color: #183148; border-radius: 4px; }
+        button { cursor: pointer; } button:hover { background: #edf5ff; }
+        #status, #bridge-status, #picked { margin-top: 7px; line-height: 1.5; overflow-wrap: anywhere; }
+        #status[data-error="true"] { color: #b42318; }
+        #bridge-status, #picked { color: #536779; font-size: 12px; }
+        .drone { min-width: 90px; padding: 4px 7px; border: 2px solid var(--color); border-radius: 6px; background: white; color: #183148; text-align: center; font: 12px "Microsoft YaHei", sans-serif; white-space: nowrap; box-shadow: 0 2px 4px #0002; }
+        .drone::before { content: "✦"; color: var(--color); margin-right: 4px; }
+        .drone.simulation { border-style: dashed; background: #fff8e8; }
+        .drone.stale { opacity: .55; }
+        .waypoint { background: #1767c0; color: white; border: 2px solid white; border-radius: 50%; padding: 3px 6px; font: bold 12px sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="map" aria-label="高德地图"></div>
+    <details id="tools" open>
+        <summary>地图工具</summary>
+        <div class="row">
+            <button id="fit">显示全部</button>
+            <select id="follow" aria-label="跟随飞机"><option value="">不跟随</option></select>
+        </div>
+        <div class="row">
+            <label><input id="satellite" type="checkbox">卫星图</label>
+            <label><input id="tracks" type="checkbox" checked>轨迹</label>
+            <button id="clear-tracks">清轨迹</button>
+        </div>
+        <div class="row"><button id="clear-formation">清除模拟</button><button id="reload">重新加载</button></div>
+        <div id="status" role="status">正在加载高德地图…</div>
+        <div id="bridge-status">正在检查地面站连接…</div>
+        <div id="picked">点击地图选取航点（GCJ-02）</div>
+    </details>
+    <script id="gaode-config">
+// 高德控制台的「Web 端（JS API）」Key。
+// 如控制台提供安全密钥，请填写 securityJsCode 后重新加载页面。
+window.GAODE_CONFIG = {
+    key: "da6f3fbf89b6eb5261f67d858c640547",
+    securityJsCode: ""
+};
+</script>
+    <script id="gaode-app">
+(function () {
+    "use strict";
+    const colors = ["#1677ff", "#d9363e", "#389e0d", "#722ed1", "#d46b08", "#08979c", "#c41d7f", "#595959", "#7c8c00", "#1d39c4"];
+    const drones = new Map();
+    const formations = new Map();
+    const latest = new Map();
+    const latestFormation = new Map();
+    let map, satellite, roadNet, pickedMarker, missionLine;
+    let mission = [], missionMarkers = [], centered = false, bridgeConnecting = false;
+    let picked = null, pickedPending = false;
+    const el = id => document.getElementById(id);
+    const status = (message, error) => {
+        el("status").textContent = message;
+        el("status").dataset.error = error ? "true" : "false";
+    };
+    function validPosition(lat, lon) {
+        return typeof lat === "number" && typeof lon === "number" &&
+            Number.isFinite(lat) && Number.isFinite(lon) &&
+            Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0);
+    }
+    function validDrone(id, lat, lon, alt) {
+        return Number.isInteger(id) && id >= 1 && id <= 10 &&
+            validPosition(lat, lon) && typeof alt === "number" && Number.isFinite(alt);
+    }
+
+    // 与 MAVLinkParser 的本地转换算法一致；仅用于 WGS-84 编队、任务点。
+    function wgs84ToGcj02(lat, lon) {
+        if (lon < 72.004 || lon > 137.8347 || lat < .8293 || lat > 55.8271) return [lon, lat];
+        const pi = Math.PI, x = lon - 105, y = lat - 35;
+        let dy = -100 + 2*x + 3*y + .2*y*y + .1*x*y + .2*Math.sqrt(Math.abs(x));
+        dy += (20*Math.sin(6*x*pi) + 20*Math.sin(2*x*pi))*2/3;
+        dy += (20*Math.sin(y*pi) + 40*Math.sin(y*pi/3))*2/3;
+        dy += (160*Math.sin(y*pi/12) + 320*Math.sin(y*pi/30))*2/3;
+        let dx = 300 + x + 2*y + .1*x*x + .1*x*y + .1*Math.sqrt(Math.abs(x));
+        dx += (20*Math.sin(6*x*pi) + 20*Math.sin(2*x*pi))*2/3;
+        dx += (20*Math.sin(x*pi) + 40*Math.sin(x*pi/3))*2/3;
+        dx += (150*Math.sin(x*pi/12) + 300*Math.sin(x*pi/30))*2/3;
+        const rad = lat*pi/180, magic = 1 - .00669342162296594323*Math.sin(rad)**2;
+        const root = Math.sqrt(magic);
+        dy = dy*180 / ((6378245*(1-.00669342162296594323))/(magic*root)*pi);
+        dx = dx*180 / (6378245/root*Math.cos(rad)*pi);
+        return [lon + dx, lat + dy];
+    }
+
+    function renderDrone(id, position, altitude, simulated) {
+        const collection = simulated ? formations : drones;
+        let entry = collection.get(id);
+        if (!entry) {
+            const label = document.createElement("div");
+            label.className = "drone" + (simulated ? " simulation" : "");
+            label.style.setProperty("--color", colors[id-1]);
+            const marker = new AMap.Marker({ map, position, content: label, anchor: "bottom-center", zIndex: simulated ? 110 : 120 });
+            entry = { marker, label, path: [], track: null, updated: Date.now() };
+            if (!simulated) {
+                entry.track = new AMap.Polyline({ map, path: [], strokeColor: colors[id-1], strokeWeight: 3, strokeOpacity: .7 });
+                if (!el("tracks").checked) entry.track.hide();
+            }
+            collection.set(id, entry);
+        }
+        entry.updated = Date.now();
+        entry.label.classList.remove("stale");
+        entry.label.textContent = simulated ? `模拟 ${id} · ΔZ ${altitude.toFixed(1)} m` : `${id}号机 · 海拔 ${altitude.toFixed(1)} m`;
+        entry.label.title = `GCJ-02 纬度 ${position[1].toFixed(7)}，经度 ${position[0].toFixed(7)}`;
+        entry.marker.setPosition(position);
+        if (!simulated) {
+            const last = entry.path[entry.path.length - 1];
+            if (!last || last[0] !== position[0] || last[1] !== position[1]) {
+                entry.path.push(position);
+                if (entry.path.length > 1000) entry.path.shift();
+                entry.track.setPath(entry.path.length > 1 ? entry.path : []);
+            }
+        }
+        if (!centered) {
+            map.setZoomAndCenter(18, position);
+            centered = true;
+        } else if (!simulated && el("follow").value === String(id)) {
+            map.setCenter(position);
+        }
+    }
+
+    // QML: updateDronePosition(sysid, latGCJ02, lonGCJ02, altitudeMSL).
+    window.updateDronePosition = function (id, lat, lon, alt) {
+        if (!validDrone(id, lat, lon, alt)) return false;
+        latest.set(id, [lon, lat, alt]);
+        if (map) renderDrone(id, [lon, lat], alt, false);
+        return true;
+    };
+    // QML: 基于长机原始 GPS 位置计算的偏移，offsetZ 是相对高度差。
+    window.updateDronePositionWithFormation = function (id, lat, lon, offsetZ) {
+        if (!validDrone(id, lat, lon, offsetZ)) return false;
+        const position = wgs84ToGcj02(lat, lon);
+        latestFormation.set(id, [position[0], position[1], offsetZ]);
+        if (map) renderDrone(id, position, offsetZ, true);
+        return true;
+    };
+
+    function drawMission() {
+        if (!map) return;
+        missionMarkers.forEach(marker => marker.setMap(null));
+        missionMarkers = [];
+        if (missionLine) { missionLine.setMap(null); missionLine = null; }
+        const path = mission.map((point, index) => {
+            const position = wgs84ToGcj02(point.lat, point.lon);
+            const label = document.createElement("div");
+            label.className = "waypoint";
+            label.textContent = String(index + 1);
+            missionMarkers.push(new AMap.Marker({ map, position, content: label, anchor: "center", zIndex: 100, title: `航点 ${index + 1}` }));
+            return position;
+        });
+        if (path.length > 1) missionLine = new AMap.Polyline({ map, path, strokeColor: "#1767c0", strokeWeight: 3, strokeStyle: "dashed" });
+    }
+    window.setMissionWaypoints = function (points) {
+        if (!Array.isArray(points) || points.some(point => !point || !validPosition(point.lat, point.lon))) return false;
+        mission = points.map(point => ({ lat: point.lat, lon: point.lon }));
+        drawMission();
+        return true;
+    };
+
+    function sendPicked() {
+        if (!pickedPending || !picked || !window.bridge || typeof window.bridge.sendCoordinates !== "function") return;
+        window.bridge.sendCoordinates(picked.lat, picked.lon);
+        pickedPending = false;
+        el("bridge-status").textContent = "地面站已连接 · 航点坐标已回填";
+    }
+    window.connectQtBridge = function () {
+        if (window.bridge) { sendPicked(); return; }
+        if (!window.qt || !window.qt.webChannelTransport) {
+            el("bridge-status").textContent = "浏览器预览 · 在地面站内打开可回填航点";
+            return;
+        }
+        if (bridgeConnecting) return;
+        bridgeConnecting = true;
+        function connect() {
+            new QWebChannel(qt.webChannelTransport, function (channel) {
+                window.bridge = channel.objects.coordinateHandler;
+                bridgeConnecting = false;
+                el("bridge-status").textContent = window.bridge ? "地面站已连接 · 点击地图回填航点" : "未找到 coordinateHandler 桥对象";
+                sendPicked();
+            });
+        }
+        if (typeof QWebChannel !== "undefined") { connect(); return; }
+        const script = document.createElement("script");
+        script.src = "qrc:///qtwebchannel/qwebchannel.js";
+        script.onload = connect;
+        script.onerror = function () {
+            bridgeConnecting = false;
+            el("bridge-status").textContent = "WebChannel 加载失败，请检查 Qt WebChannel 模块";
+        };
+        document.head.appendChild(script);
+    };
+
+    function initializeMap() {
+        try {
+            map = new AMap.Map("map", { viewMode: "2D", zoom: 5, center: [105, 35], doubleClickZoom: true });
+            window.map = map;
+            satellite = new AMap.TileLayer.Satellite();
+            roadNet = new AMap.TileLayer.RoadNet();
+            map.on("complete", function () { status("地图已就绪 · 等待 / 显示飞机位置"); });
+            map.on("click", function (event) {
+                const lat = event.lnglat.getLat(), lon = event.lnglat.getLng();
+                if (!validPosition(lat, lon)) return;
+                picked = { lat, lon };
+                pickedPending = true;
+                if (!pickedMarker) pickedMarker = new AMap.Marker({ map, position: [lon, lat], title: "选取的航点", zIndex: 90 });
+                else pickedMarker.setPosition([lon, lat]);
+                el("picked").textContent = `GCJ-02 纬度 ${lat.toFixed(7)} / 经度 ${lon.toFixed(7)}`;
+                window.connectQtBridge();
+                sendPicked();
+            });
+            latest.forEach((p, id) => renderDrone(id, p.slice(0, 2), p[2], false));
+            latestFormation.forEach((p, id) => renderDrone(id, p.slice(0, 2), p[2], true));
+            drawMission();
+            el("satellite").onchange();
+            status("地图已初始化 · 正在加载底图");
+        } catch (error) {
+            status("地图初始化失败：" + error.message + "。请检查网络、Web 端 Key 和安全密钥。", true);
+        }
+    }
+    for (let id = 1; id <= 10; id++) {
+        const option = document.createElement("option");
+        option.value = String(id); option.textContent = `跟随 ${id} 号机`;
+        el("follow").appendChild(option);
+    }
+    el("fit").onclick = function () {
+        if (!map) return;
+        const overlays = [...drones.values(), ...formations.values()].map(entry => entry.marker).concat(missionMarkers);
+        if (pickedMarker) overlays.push(pickedMarker);
+        if (overlays.length) map.setFitView(overlays, false, [130, 210, 120, 40], 19);
+    };
+    el("follow").onchange = function () {
+        const entry = drones.get(Number(el("follow").value));
+        if (map && entry) map.setCenter(entry.marker.getPosition());
+    };
+    el("satellite").onchange = function () {
+        if (!map) return;
+        if (el("satellite").checked) map.add([satellite, roadNet]);
+        else map.remove([satellite, roadNet]);
+    };
+    el("tracks").onchange = function () {
+        drones.forEach(entry => el("tracks").checked ? entry.track.show() : entry.track.hide());
+    };
+    el("clear-tracks").onclick = function () {
+        drones.forEach(entry => { entry.path = []; entry.track.setPath([]); });
+    };
+    el("clear-formation").onclick = function () {
+        formations.forEach(entry => entry.marker.setMap(null));
+        formations.clear(); latestFormation.clear();
+    };
+    el("reload").onclick = () => window.location.reload();
+    setInterval(function () {
+        drones.forEach(entry => {
+            const stale = Date.now() - entry.updated > 10000;
+            entry.label.classList.toggle("stale", stale);
+            if (stale) entry.label.title = "超过 10 秒未收到位置更新；此为最后位置";
+        });
+    }, 2000);
+    window.connectQtBridge();
+    const config = window.GAODE_CONFIG || {};
+    if (!config.key) { status("缺少高德 Key，请编辑 gaode.html 中的 GAODE_CONFIG。", true); return; }
+    if (config.securityJsCode) window._AMapSecurityConfig = { securityJsCode: config.securityJsCode };
+    const sdk = document.createElement("script");
+    const timeout = setTimeout(() => status("高德加载超时。请检查网络、Web 端 Key、域名白名单与 securityJsCode，然后重新加载。", true), 20000);
+    sdk.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(config.key);
+    sdk.onload = function () {
+        clearTimeout(timeout);
+        if (window.AMap) initializeMap();
+        else status("高德 API 未就绪，请检查 Key 类型与 securityJsCode（gaode.html 中的 GAODE_CONFIG）。", true);
+    };
+    sdk.onerror = function () { clearTimeout(timeout); status("无法加载高德 API，请检查网络后重新加载。", true); };
+    document.head.appendChild(sdk);
+}());
+</script>
+</body>
+</html>

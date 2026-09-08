@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # TextToSpeech is optional: it is not included in every Qt installation.
 # The application supplies a no-op QML-compatible fallback when unavailable.
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick SerialPort WebEngineQuick)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick SerialPort WebEngineQuick Network)
 find_package(Qt6TextToSpeech QUIET CONFIG)
 
 
@@ -16,9 +16,13 @@ qt_standard_project_setup(REQUIRES 6.5)
 
 qt_add_executable(apprebulid
     main.cpp
+    localmapserver.cpp
+    localmapserver.h
     SerialPortManager.cpp
     SerialPortManager.h
 )
+
+qt_add_resources(apprebulid map_page PREFIX "/map" FILES gaode.html)
 
 qt_add_qml_module(apprebulid
     URI rebulid
@@ -48,7 +52,7 @@ set_target_properties(apprebulid PROPERTIES
 )
 
 target_link_libraries(apprebulid
-    PRIVATE Qt6::Quick Qt6::SerialPort
+    PRIVATE Qt6::Quick Qt6::SerialPort Qt6::Network
 )
 target_link_libraries(apprebulid PRIVATE Qt6::Quick Qt6::WebEngineQuick)
 
@@ -66,3 +70,13 @@ install(TARGETS apprebulid
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+option(BUILD_MAP_SERVER_TESTS "Build offline map HTTP server checks" OFF)
+if(BUILD_MAP_SERVER_TESTS)
+    enable_testing()
+    qt_add_executable(map_server_test tests/localmapserver_test.cpp localmapserver.cpp)
+    target_include_directories(map_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(map_server_test PRIVATE Qt6::Network)
+    qt_add_resources(map_server_test test_map_page PREFIX "/map" FILES gaode.html)
+    add_test(NAME map_server_test COMMAND map_server_test)
+endif()

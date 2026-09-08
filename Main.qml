@@ -75,23 +75,78 @@ Window {
         registeredObjects: [ coordinateHandler ]
     }
 
-    // 地图显示区域 在 WebEngineView 中绑定 WebChannel 并注入桥初始化脚本
+    // 缓存最新位置：网页加载期间不丢数据，100 ms 批量刷新，避免频繁跨进程调用。
+    property var mapDronePositions: ({})
+    property var mapPendingDrones: ({})
+    property var mapFormationPositions: ({})
+    property bool mapPositionsDirty: false
+    property bool mapMissionDirty: true
+
+    Timer {
+        interval: 100
+        running: true
+        repeat: true
+        onTriggered: {
+            if (!gaodeMapView.pageReady)
+                return
+            var script = ""
+            if (mapPositionsDirty) {
+                for (var id in mapPendingDrones)
+                    script += "window.updateDronePosition && window.updateDronePosition.apply(null," + JSON.stringify(mapPendingDrones[id]) + ");"
+                for (var formationId in mapFormationPositions)
+                    script += "window.updateDronePositionWithFormation && window.updateDronePositionWithFormation.apply(null," + JSON.stringify(mapFormationPositions[formationId]) + ");"
+                mapPositionsDirty = false
+                mapPendingDrones = ({})
+                // 模拟只刷新有变化的点，避免清除后被遥测刷新重新绘制。
+                mapFormationPositions = ({})
+            }
+            if (mapMissionDirty) {
+                script += "window.setMissionWaypoints && window.setMissionWaypoints(" + JSON.stringify(missionList) + ");"
+                mapMissionDirty = false
+            }
+            if (script.length > 0)
+                gaodeMapView.runJavaScript(script)
+        }
+    }
+
+    // 地图显示区域，页面自行加载 Qt 的 qwebchannel.js。
     WebEngineView {
         id: gaodeMapView
         anchors.fill: parent
-        url: "http://localhost:8000/try.html"
+        url: mapPageUrl
+        property bool pageReady: false
 
         webChannel: webChannel
         onLoadingChanged: function(request) {
-            // 1. 对比 WebEngineView 自带的枚举
+            if (request.status === WebEngineView.LoadStartedStatus)
+                pageReady = false
             if (request.status === WebEngineView.LoadSucceededStatus) {
-                // 2. 注入桥初始化脚本
-                runJavaScript(
-                    "new QWebChannel(qt.webChannelTransport, function(channel){" +
-                        "window.bridge = channel.objects.coordinateHandler;" +
-                    "});"
-                )
+                pageReady = true
+                mapPendingDrones = mapDronePositions
+                mapPositionsDirty = true
+                mapMissionDirty = true
+                runJavaScript("window.connectQtBridge && window.connectQtBridge();")
+            } else if (request.status === WebEngineView.LoadFailedStatus) {
+                pageReady = false
+                console.warn("地图加载失败，请检查地图文件并重启程序：", request.errorString)
             }
+        }
+    }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 40, 420)
+        height: mapErrorText.implicitHeight + 24
+        color: "#fff3ed"
+        radius: 6
+        visible: mapServerError.length > 0
+        Text {
+            id: mapErrorText
+            anchors.centerIn: parent
+            width: parent.width - 24
+            text: mapServerError
+            color: "#b42318"
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -207,13 +262,9 @@ Window {
             // 只保留 1~10 号机，其余直接忽略
             if (sysid < 1 || sysid > 10)
                 return;
-            gaodeMapView.runJavaScript(
-                "updateDronePosition("
-                + sysid + ", "
-                + lat   + ", "
-                + lon   + ", "
-                + alt   + ")"
-            );
+            mapDronePositions[sysid] = [sysid, lat, lon, alt]
+            mapPendingDrones[sysid] = mapDronePositions[sysid]
+            mapPositionsDirty = true
         }
     }
 
@@ -556,6 +607,7 @@ Window {
                                 speed:    speed
                             })
                             console.log("已添加航点，当前列表长度=", missionList.length)
+                            mapMissionDirty = true
                         }
                     }
 
@@ -597,6 +649,8 @@ Window {
                             MissionPlanner.clearWaypoints(
                                 parseInt(aircraftIdComboBox.currentText)
                             )
+                            missionList = []
+                            mapMissionDirty = true
                         }
                     }
                 }
@@ -607,6 +661,7 @@ Window {
                     function onDownloadFinished(payload) {
                         console.log("Downloaded waypoints:", JSON.stringify(payload, null, 2))
                         missionList = payload
+                        mapMissionDirty = true
                     }
                 }
 
@@ -893,19 +948,18 @@ Window {
         function onFormationStatusWithOffsetUpdated(formationType, droneId, offsetX, offsetY, offsetZ) {
             var baseLat = currentLatitude
             var baseLon = currentLongitude
+            if (!isFinite(baseLat) || !isFinite(baseLon) || (baseLat === 0 && baseLon === 0)) {
+                console.warn("尚未收到长机 GPS 位置，无法显示编队模拟")
+                return
+            }
             var lat = baseLat + offsetY / 111139.0
             var lon = baseLon + offsetX / (111139.0 * Math.cos(baseLat * Math.PI / 180.0))
             console.log("[Simulate] DroneID=", droneId,
                         " => Lat=", lat.toFixed(6),
                         " Lon=", lon.toFixed(6),
                         " Z=", offsetZ)
-            gaodeMapView.runJavaScript(
-                        "updateDronePositionWithFormation(" +
-                        droneId + ", " +
-                        lat.toFixed(6) + ", " +
-                        lon.toFixed(6) + ", " +
-                        offsetZ + ")"
-                        )
+            mapFormationPositions[droneId] = [droneId, lat, lon, offsetZ]
+            mapPositionsDirty = true
         }
     }
 
