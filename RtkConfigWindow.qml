@@ -18,11 +18,11 @@ Dialog {
         padding: 20
 
         Row { spacing: 5
-            Text { text: "主机地址：" }
+            Label { text: "主机地址：" }
             TextField { id: hostField; placeholderText: "如 120.253.239.161" }
         }
         Row { spacing: 5
-            Text { text: "端口号：" }
+            Label { text: "端口号：" }
             TextField {
                 id: portField
                 placeholderText: "如 8002"
@@ -30,15 +30,15 @@ Dialog {
             }
         }
         Row { spacing: 5
-            Text { text: "挂载点：" }
+            Label { text: "挂载点：" }
             TextField { id: mountField; placeholderText: "如 RTCM3_GREC" }
         }
         Row { spacing: 5
-            Text { text: "账号：" }
+            Label { text: "账号：" }
             TextField { id: userField; placeholderText: "输入账号" }
         }
         Row { spacing: 5
-            Text { text: "密码：" }
+            Label { text: "密码：" }
             TextField {
                 id: pwdField
                 placeholderText: "输入密码"

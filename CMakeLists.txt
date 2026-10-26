@@ -23,6 +23,7 @@ qt_add_executable(apprebulid
 )
 
 qt_add_resources(apprebulid map_page PREFIX "/map" FILES gaode.html)
+qt_add_resources(apprebulid controls_style PREFIX "/" FILES qtquickcontrols2.conf)
 
 qt_add_qml_module(apprebulid
     URI rebulid
@@ -42,6 +43,7 @@ qt_add_qml_module(apprebulid
         SOURCES rtkclient.h rtkclient.cpp
         QML_FILES RtkConfigWindow.qml
         QML_FILES coordinateUtils.js
+        QML_FILES Theme.js
 )
 
 set_target_properties(apprebulid PROPERTIES

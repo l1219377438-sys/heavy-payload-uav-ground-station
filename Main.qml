@@ -1,5 +1,6 @@
   import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtWebEngine 1.9
 import Qt.labs.platform 1.1
 import QtQuick.Layouts 1.15   // 放在文件头部
@@ -8,6 +9,7 @@ import QtWebChannel 1.0
 import "coordinateUtils.js" as Coord
 
 import "FormationLanding.js" as Landing
+import "Theme.js" as Theme
 
 
 
@@ -15,8 +17,9 @@ import ShowAttitude 1.0
 
 Window {
     visible: true
-    width: 640
-    height: 480
+    width: 1280
+    height: 800
+    color: Theme.background
     title: qsTr("无人机烟花地面站")
     property var missionList: []    // 存放所有待上传的航点
 
@@ -28,11 +31,13 @@ Window {
         function onConnected() {
             console.log("[UI] RTK 已连接")
             rtkStatusText.text = "RTK: 已连接"
+            rtkStatusText.color = Theme.success
         }
 
         function onErrorOccurred(err) {
             console.warn("[UI] RTK 错误：" + err)
             rtkStatusText.text = "RTK 错误：" + err
+            rtkStatusText.color = Theme.danger
         }
 
         function onRtkDataReady(data) {
@@ -42,11 +47,21 @@ Window {
     }
 
 
-    Text {
+    Label {
         id: rtkStatusText
         text: "RTK: 未连接"
         anchors.top: parent.top; anchors.right: parent.right
-        font.pixelSize: 14; color: "green"
+        anchors.margins: 10
+        z: 2
+        padding: 8
+        leftPadding: 12; rightPadding: 12
+        font.pixelSize: 14; font.bold: true
+        color: Theme.textMuted
+        background: Rectangle {
+            radius: height / 2
+            color: Theme.panel
+            border.color: Theme.border
+        }
     }
 
 
@@ -137,15 +152,16 @@ Window {
         anchors.centerIn: parent
         width: Math.min(parent.width - 40, 420)
         height: mapErrorText.implicitHeight + 24
-        color: "#fff3ed"
-        radius: 6
+        color: Theme.panelSolid
+        border.color: Theme.danger
+        radius: Theme.radius
         visible: mapServerError.length > 0
-        Text {
+        Label {
             id: mapErrorText
             anchors.centerIn: parent
             width: parent.width - 24
             text: mapServerError
-            color: "#b42318"
+            color: "#fca5a5"
             wrapMode: Text.WordWrap
         }
     }
@@ -282,11 +298,8 @@ Window {
         interactive: true
 
         background: Rectangle {
-            radius: 8; border.width: 1; border.color: "#999999"
-            gradient: Gradient {
-                GradientStop { position: 0; color: "#F0F8FF" }
-                GradientStop { position: 1; color: "#4682B4" }
-            }
+            radius: Theme.radius; border.width: 1; border.color: Theme.border
+            color: Theme.panel
         }
 
         /* ======== UI ======== */
@@ -295,47 +308,47 @@ Window {
             anchors.margins: 10
             spacing: 15
 
-            Text { text: "动态波浪航点生成" ; font.pixelSize: 16; font.bold: true }
+            Label { text: "动态波浪航点生成" ; font.pixelSize: 16; font.bold: true }
 
             /* 振幅 */
             Row {
                 spacing: 5
-                Text { text: "振幅 A (m):" ; font.pixelSize: 14 }
+                Label { text: "振幅 A (m):" ; font.pixelSize: 14 }
                 TextField { id: amplitudeField; width: 120; text: "1.0"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
             }
 
             /* 波长 */
             Row {
                 spacing: 5
-                Text { text: "波长 λ (m):" ; font.pixelSize: 14 }
+                Label { text: "波长 λ (m):" ; font.pixelSize: 14 }
                 TextField { id: wavelengthField; width: 120; text: "20"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
             }
 
             /* 波相速度 */
             Row {
                 spacing: 5
-                Text { text: "波速 v₁ (m/s):" ; font.pixelSize: 14 }
+                Label { text: "波速 v₁ (m/s):" ; font.pixelSize: 14 }
                 TextField { id: waveSpeedField; width: 120; text: "0.5"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
             }
 
             /* 北/南平移速度 */
             Row {
                 spacing: 5
-                Text { text: "平移 v₂ (m/s):" ; font.pixelSize: 14 }
+                Label { text: "平移 v₂ (m/s):" ; font.pixelSize: 14 }
                 TextField { id: moveSpeedField; width: 120; text: "0"; placeholderText: "正北负南"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
             }
 
             /* 持续时间 */
             Row {
                 spacing: 5
-                Text { text: "持续时间 T (s):" ; font.pixelSize: 14 }
+                Label { text: "持续时间 T (s):" ; font.pixelSize: 14 }
                 TextField { id: durationField; width: 120; text: "12"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
             }
 
             /* 离散点数 */
             Row {
                 spacing: 5
-                Text { text: "航点数 N:" ; font.pixelSize: 14 }
+                Label { text: "航点数 N:" ; font.pixelSize: 14 }
                 TextField { id: countField; width: 120; text: "40"; inputMethodHints: Qt.ImhDigitsOnly }
             }
 
@@ -409,13 +422,10 @@ Window {
         interactive: true
 
         background: Rectangle {
-            radius: 8
+            radius: Theme.radius
             border.width: 1
-            border.color: "#999999"
-            gradient: Gradient {
-                GradientStop { position: 0; color: "#B0C4DE" }
-                GradientStop { position: 1; color: "#4682B4" }
-            }
+            border.color: Theme.border
+            color: Theme.panel
         }
 
         contentItem: Column {
@@ -427,7 +437,7 @@ Window {
             // 起飞高度输入
             Row {
                 spacing: 5
-                Text {
+                Label {
                     text: "起飞高度:"
                     font.pixelSize: 14
                 }
@@ -497,7 +507,7 @@ Window {
                 id: waypointTaskSection
                 spacing: 5
 
-                Text {
+                Label {
                     text: "航点任务参数"
                     font.pixelSize: 16
                     font.bold: true
@@ -505,7 +515,7 @@ Window {
 
                 Row {
                     spacing: 5
-                    Text {
+                    Label {
                         text: "纬度:"
                         font.pixelSize: 14
                     }
@@ -519,7 +529,7 @@ Window {
                 }
                 Row {
                     spacing: 5
-                    Text {
+                    Label {
                         text: "经度:"
                         font.pixelSize: 14
                     }
@@ -533,7 +543,7 @@ Window {
                 }
                 Row {
                     spacing: 5
-                    Text {
+                    Label {
                         text: "海拔:"
                         font.pixelSize: 14
                     }
@@ -547,7 +557,7 @@ Window {
                 }
                 Row {
                     spacing: 5
-                    Text {
+                    Label {
                         text: "停留时间:"
                         font.pixelSize: 14
                     }
@@ -561,7 +571,7 @@ Window {
                 }
                 Row {
                     spacing: 5
-                    Text {
+                    Label {
                         text: "飞行速度:"
                         font.pixelSize: 14
                     }
@@ -689,13 +699,10 @@ Window {
         interactive: true
 
         background: Rectangle {
-            radius: 8
+            radius: Theme.radius
             border.width: 1
-            border.color: "#999999"
-            gradient: Gradient {
-                GradientStop { position: 0; color: "#B0C4DE" }
-                GradientStop { position: 1; color: "#4682B4" }
-            }
+            border.color: Theme.border
+            color: Theme.panel
         }
 
         contentItem: Column {
@@ -707,7 +714,7 @@ Window {
             // 起飞高度输入
             Row {
                 spacing: 5
-                Text {
+                Label {
                     text: "起飞高度:"
                     font.pixelSize: 14
                 }
@@ -761,7 +768,7 @@ Window {
             // 编队参数输入
             Row {
                 spacing: 5
-                Text {
+                Label {
                     text: "编队模式:"
                     font.pixelSize: 14
                 }
@@ -775,7 +782,7 @@ Window {
             }
             Row {
                 spacing: 5
-                Text {
+                Label {
                     text: "编队间距:"
                     font.pixelSize: 14
                 }
@@ -790,7 +797,7 @@ Window {
             }
             Row {
                 spacing: 5
-                Text {
+                Label {
                     text: "编队速度:"
                     font.pixelSize: 14
                 }
@@ -805,7 +812,7 @@ Window {
             }
             Row {
                 spacing: 5
-                Text {
+                Label {
                     text: "编队角度:"
                     font.pixelSize: 14
                 }
@@ -970,53 +977,62 @@ Window {
         z: 1
 
         // 左侧按钮区域
-        Column {
-            id: leftButtonColumn
+        Rectangle {
             anchors {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
                 leftMargin: 10
             }
-            spacing: 10
+            width: leftButtonColumn.implicitWidth + 16
+            height: leftButtonColumn.implicitHeight + 16
+            radius: Theme.radius
+            color: Theme.panel
+            border.color: Theme.border
 
-            Button {
-                text: "单机控制"
-                font.pixelSize: 16
-                padding: 10
-                onClicked: {
-                    formationDrawer.close()
-                    singleControlDrawer.open()
-                }
-            }
-            Button {
-                text: "多机控制"
-                font.pixelSize: 16
-                padding: 10
-                onClicked: {
-                    singleControlDrawer.close()
-                    formationDrawer.open()
-                }
-            }
-            // 然后在 overlay 或左侧按钮区加一个入口：
-            Button {
-                text: "动态编队"
-                font.pixelSize: 16; padding: 10
-                onClicked: {
-                    singleControlDrawer.close()
-                    formationDrawer.close()
-                    pathPlanningDrawer.open()
-                }
-            }
-            Button {
-                text: "连接 RTK"
-                font.pixelSize: 16
-                padding: 10
+            Column {
+                id: leftButtonColumn
+                anchors.centerIn: parent
+                spacing: 4
+
                 Button {
-                    text: "连接 RTK"
-                    font.pixelSize: 16; padding: 10
+                    width: 120
+                    text: "单机控制"
+                    font.pixelSize: 15
+                    highlighted: singleControlDrawer.opened
                     onClicked: {
-                        rtkConfigWindow.open()
+                        formationDrawer.close()
+                        pathPlanningDrawer.close()
+                        singleControlDrawer.open()
                     }
+                }
+                Button {
+                    width: 120
+                    text: "多机控制"
+                    font.pixelSize: 15
+                    highlighted: formationDrawer.opened
+                    onClicked: {
+                        singleControlDrawer.close()
+                        pathPlanningDrawer.close()
+                        formationDrawer.open()
+                    }
+                }
+                Button {
+                    width: 120
+                    text: "动态编队"
+                    font.pixelSize: 15
+                    highlighted: pathPlanningDrawer.opened
+                    onClicked: {
+                        singleControlDrawer.close()
+                        formationDrawer.close()
+                        pathPlanningDrawer.open()
+                    }
+                }
+                Button {
+                    width: 120
+                    text: "连接 RTK"
+                    font.pixelSize: 15
+                    flat: true
+                    onClicked: rtkConfigWindow.open()
                 }
             }
         }
@@ -1041,12 +1057,20 @@ Window {
         }
 
         // 经纬度、海拔、电压显示控件（位于仪表盘右侧）
+        Rectangle {
+            anchors.fill: positionDisplay
+            anchors.margins: -10
+            radius: Theme.radius
+            color: Theme.panel
+            border.color: Theme.border
+        }
         Column {
             id: positionDisplay
             anchors {
                 left: attitudeIndicator.right
                 bottom: attitudeIndicator.bottom
-                leftMargin: 10
+                leftMargin: 20
+                bottomMargin: 10
             }
             spacing: 4
 
@@ -1057,46 +1081,54 @@ Window {
             property string relativeAltitude: "N/A"
             property string satellites: "N/A"
 
-            Text {
+            Label {
                 text: "卫星数量: " + positionDisplay.satellites
                 font.pixelSize: 14
             }
-            Text {
+            Label {
                 text: "电压: " + positionDisplay.voltage
                 font.pixelSize: 14
             }
-            Text {
+            Label {
                 text: "纬度: " + positionDisplay.latitude
                 font.pixelSize: 14
             }
-            Text {
+            Label {
                 text: "经度: " + positionDisplay.longitude
                 font.pixelSize: 14
             }
-            Text {
+            Label {
                 text: "海拔: " + positionDisplay.altitude
                 font.pixelSize: 14
             }
-            Text {
+            Label {
                 text: "对地高度: " + positionDisplay.relativeAltitude
                 font.pixelSize: 14
             }
         }
 
         // 串口、飞机ID设置区域
+        Rectangle {
+            anchors.fill: connectionPanel
+            anchors.margins: -10
+            radius: Theme.radius
+            color: Theme.panel
+            border.color: Theme.border
+        }
         Column {
+            id: connectionPanel
             spacing: 10
             anchors {
                 top: parent.top
                 left: parent.left
-                topMargin: 10
-                leftMargin: 10
+                topMargin: 20
+                leftMargin: 20
             }
 
             // 飞机串口部分
             Row {
                 spacing: 8
-                Text {
+                Label {
                     text: "飞机串口:"
                     font.pixelSize: 14
                 }
@@ -1106,7 +1138,7 @@ Window {
                     width: 120
                     model: SerialPortManager.availablePorts
                 }
-                Text {
+                Label {
                     text: "波特率:"
                     font.pixelSize: 14
                 }
@@ -1122,6 +1154,7 @@ Window {
                     font.pixelSize: 14
                     width: 100
                     padding: 6
+                    Material.background: SerialPortManager.isPortOpen ? Theme.danger : Theme.success
                     onClicked: {
                         SerialPortManager.togglePort(serialportComboBox.currentText, baudComboBox.currentText)
                     }
@@ -1131,7 +1164,7 @@ Window {
             // 点火串口部分
             Row {
                 spacing: 8
-                Text {
+                Label {
                     text: "点火串口:"
                     font.pixelSize: 14
                 }
@@ -1141,7 +1174,7 @@ Window {
                     width: 120
                     model: SerialPortManagerFire.availablePorts
                 }
-                Text {
+                Label {
                     text: "波特率:"
                     font.pixelSize: 14
                 }
@@ -1157,6 +1190,7 @@ Window {
                     font.pixelSize: 14
                     width: 100
                     padding: 6
+                    Material.background: SerialPortManagerFire.isPortOpen ? Theme.danger : Theme.success
                     onClicked: {
                         SerialPortManagerFire.togglePort(serialportComboBoxFire.currentText, baudComboBoxFire.currentText)
                     }
@@ -1166,7 +1200,7 @@ Window {
             // 飞机ID选择
             Row {
                 spacing: 8
-                Text {
+                Label {
                     text: "飞机ID:"
                     font.pixelSize: 14
                 }
@@ -1224,17 +1258,28 @@ Window {
                 }
             }
 
+            Rectangle {
+                anchors.fill: timerPanel
+                anchors.margins: -12
+                radius: Theme.radius
+                color: Theme.panel
+                border.color: Theme.border
+            }
+
             Column {
+                id: timerPanel
                 anchors.centerIn: parent
                 spacing: 10
 
                 // 第一行：计时文本、开始/暂停按钮、任务名称输入和添加任务按钮
                 Row {
                     spacing: 20
-                    Text {
+                    Label {
                         id: timerDisplay
                         text: timerItem.elapsedTime.toFixed(3)
                         font.pixelSize: 28
+                        font.family: Theme.mono
+                        color: timer.running ? Theme.accent : Theme.text
                         horizontalAlignment: Text.AlignHCenter
                     }
                     Row {
@@ -1264,6 +1309,13 @@ Window {
                             width: 100
                             placeholderText: "编队任务"
                             font.pixelSize: 14
+                        }
+                        TextField {
+                            id: triggerTimeField
+                            width: 100
+                            placeholderText: "触发时间(秒)"
+                            font.pixelSize: 14
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
                         }
                         Button {
                             text: "添加编队任务"
@@ -1331,10 +1383,9 @@ Window {
                 Rectangle {
                     width: 600
                     height: 200
-                    color: "white"
-                    opacity: 0.5
-                    radius: 4
-                    border.color: "gray"
+                    color: Theme.input
+                    radius: 6
+                    border.color: Theme.border
                     ScrollView {
                         anchors.fill: parent
                         TextArea {
