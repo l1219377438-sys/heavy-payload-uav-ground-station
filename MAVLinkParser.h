@@ -82,6 +82,8 @@ private:
     QString                m_gaodeKey;
 
     QMap<int, QPair<double,double>> m_lastGcj02Coords;
+    QMap<int, uint8_t> m_lastFixType;      // 每架飞机上次的定位类型，用于去重日志
+    QMap<int, QString> m_lastRtkStatus;    // 每架飞机上次的 RTK 状态，用于去重日志
 
 };
 

@@ -241,10 +241,8 @@ void RtkClient::onReadyRead()
             }
         }
     } else {
-        // HTTP 响应头已处理，这是 RTCM 数据
+        // HTTP 响应头已处理，这是 RTCM 数据（每秒多包，不逐包打印日志）
         emit rtkDataReady(data);
-        qDebug() << "[RTK DATA]" << QDateTime::currentDateTime().toString("HH:mm:ss.zzz")
-                 << "bytes=" << data.size();
     }
 }
 

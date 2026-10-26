@@ -45,8 +45,6 @@ private:
     float m_yaw;
     float m_altitude;
 
-    QTimer *m_updateTimer;
-
     // 辅助绘图函数，基本沿用 aeroDial 的绘制思路
     void drawCrown(QPainter *painter);
     void drawYawShow(QPainter *painter, float yaw);

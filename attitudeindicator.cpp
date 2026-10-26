@@ -9,14 +9,7 @@ AttitudeIndicator::AttitudeIndicator(QQuickItem *parent)
     , m_altitude(0)
 {
     setAntialiasing(true);
-    // 定时器用于定时刷新界面（与 aeroDial 类似）
-    m_updateTimer = new QTimer(this);
-    m_updateTimer->setInterval(100);
-    connect(m_updateTimer, &QTimer::timeout, this, [this]() {
-        this->update();
-    });
-
-    m_updateTimer->start();
+    // 只在姿态数据变化时重绘（各 setter 内调用 update()），不再定时刷新
 }
 
 AttitudeIndicator::~AttitudeIndicator()

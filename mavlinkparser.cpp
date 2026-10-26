@@ -242,22 +242,14 @@ void MAVLinkParser::__handleGPSRawInt(const mavlink_message_t &msg)
     default: fixTypeStr = QString("未知(%1)").arg(fixType); break;
     }
 
-    // 打印详细的GPS状态
-    qDebug() << "[GPS_RAW_INT] 系统ID:" << msg.sysid
-             << "定位类型:" << fixTypeStr << "(" << fixType << ")"
-             << "卫星数:" << satellitesVisible
-             << "水平精度:" << (eph == UINT16_MAX ? "未知" : QString("%1cm").arg(eph))
-             << "垂直精度:" << (epv == UINT16_MAX ? "未知" : QString("%1cm").arg(epv));
-
-    // 判断RTK是否工作
-    if (fixType == 4) {
-        qDebug() << "[RTK] ✓ RTK固定解 - 厘米级精度定位";
-    } else if (fixType == 5) {
-        qDebug() << "[RTK] ⚡ RTK浮点解 - 正在收敛到固定解";
-    } else if (fixType >= 2) {
-        qDebug() << "[GPS] 标准GPS定位 - 米级精度";
-    } else {
-        qDebug() << "[GPS] ✗ GPS定位异常";
+    // 每条 GPS 消息都会到达（多机时每秒数十条），只在定位类型变化时打印，避免日志拖慢界面
+    if (m_lastFixType.value(msg.sysid, 0xFF) != fixType) {
+        m_lastFixType[msg.sysid] = fixType;
+        qDebug() << "[GPS_RAW_INT] 系统ID:" << msg.sysid
+                 << "定位类型:" << fixTypeStr << "(" << fixType << ")"
+                 << "卫星数:" << satellitesVisible
+                 << "水平精度:" << (eph == UINT16_MAX ? "未知" : QString("%1cm").arg(eph))
+                 << "垂直精度:" << (epv == UINT16_MAX ? "未知" : QString("%1cm").arg(epv));
     }
 
     // 发射信号给UI
@@ -380,7 +372,10 @@ void MAVLinkParser::__handleGpsRtk(const mavlink_message_t &msg)
         rtkStatus = "未接收到RTK数据 ✗";
     }
 
-    // 打印详细信息
+    // 只在状态变化时打印
+    if (m_lastRtkStatus.value(msg.sysid) == rtkStatus)
+        return;
+    m_lastRtkStatus[msg.sysid] = rtkStatus;
     qDebug() << "[GPS_RTK] 系统ID:" << msg.sysid
              << "RTK频率:" << int(rtk.rtk_rate) << "Hz"
              << "基线类型:" << int(rtk.baseline_coords_type)

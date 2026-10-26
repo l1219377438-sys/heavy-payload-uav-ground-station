@@ -1322,14 +1322,25 @@ Window {
             property double elapsedTime: 0
             property bool expanded: true
 
+            // 以真实时钟计时：界面卡顿时不会少计时间，刷新频率也从 100 Hz 降到 50 Hz
+            property double runStartMs: 0
+            property double runBaseTime: 0
+
             Timer {
                 id: timer
-                interval: 10
+                interval: 20
                 repeat: true
                 running: false
 
+                onRunningChanged: {
+                    if (running) {
+                        timerItem.runStartMs = Date.now()
+                        timerItem.runBaseTime = timerItem.elapsedTime
+                    }
+                }
+
                 onTriggered: {
-                    timerItem.elapsedTime += interval / 1000.0
+                    timerItem.elapsedTime = timerItem.runBaseTime + (Date.now() - timerItem.runStartMs) / 1000.0
                     var now = timerItem.elapsedTime
 
                     // ================================
