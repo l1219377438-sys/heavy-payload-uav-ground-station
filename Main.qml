@@ -24,20 +24,24 @@ Window {
     property var missionList: []    // 存放所有待上传的航点
 
     RtkConfigWindow { id: rtkConfigWindow }
-    // 在主 QML 文件里，任意合适位置添加：
+
+    // RTK 状态，显示在顶部状态栏
+    property string rtkStateText: "未连接"
+    property color rtkStateColor: Theme.idle
+
     Connections {
         target: rtkClient
 
         function onConnected() {
             console.log("[UI] RTK 已连接")
-            rtkStatusText.text = "RTK: 已连接"
-            rtkStatusText.color = Theme.success
+            rtkStateText = "已连接"
+            rtkStateColor = Theme.success
         }
 
         function onErrorOccurred(err) {
             console.warn("[UI] RTK 错误：" + err)
-            rtkStatusText.text = "RTK 错误：" + err
-            rtkStatusText.color = Theme.danger
+            rtkStateText = "错误"
+            rtkStateColor = Theme.danger
         }
 
         function onRtkDataReady(data) {
@@ -46,23 +50,6 @@ Window {
         }
     }
 
-
-    Label {
-        id: rtkStatusText
-        text: "RTK: 未连接"
-        anchors.top: parent.top; anchors.right: parent.right
-        anchors.margins: 10
-        z: 2
-        padding: 8
-        leftPadding: 12; rightPadding: 12
-        font.pixelSize: 14; font.bold: true
-        color: Theme.textMuted
-        background: Rectangle {
-            radius: height / 2
-            color: Theme.panel
-            border.color: Theme.border
-        }
-    }
 
 
     TextToSpeechManager {
@@ -970,18 +957,238 @@ Window {
         }
     }
 
-    // 叠加层，包含各类控制和显示控件
+    // 状态栏单项：状态灯 + 标题 + 数值
+    component StatusItem: Row {
+        id: statusItem
+        property string label
+        property string value
+        property color dotColor: Theme.idle
+        spacing: 8
+        Rectangle {
+            width: 8; height: 8; radius: 4
+            color: statusItem.dotColor
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Column {
+            anchors.verticalCenter: parent.verticalCenter
+            Label { text: statusItem.label; font.pixelSize: 11; color: Theme.textMuted }
+            Label {
+                text: statusItem.value
+                width: Math.min(implicitWidth, 180)
+                elide: Text.ElideRight
+                font.pixelSize: 14; font.bold: true
+            }
+        }
+    }
+
+    // 仪表区数值：小标题 + 大号等宽数字
+    component TelemetryValue: Column {
+        id: telemetryValue
+        property string label
+        property string value
+        property string unit: ""
+        spacing: 2
+        Label { text: telemetryValue.label; font.pixelSize: 11; color: Theme.textMuted }
+        Label {
+            text: telemetryValue.value + (telemetryValue.unit.length > 0 && telemetryValue.value !== "N/A" ? " " + telemetryValue.unit : "")
+            font.pixelSize: 18; font.bold: true
+            font.family: Theme.mono
+        }
+    }
+
+    // 叠加层：顶部状态栏、左侧工具栏、底部仪表与任务面板
     Item {
         id: overlay
         anchors.fill: parent
         z: 1
 
-        // 左侧按钮区域
+        // ============ 顶部状态栏 ============
+        Rectangle {
+            id: topBar
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: 56
+            color: Theme.panel
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 1
+                color: Theme.border
+            }
+
+            Row {
+                anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
+                spacing: 24
+
+                Label {
+                    text: "无人机烟花地面站"
+                    font.pixelSize: 17; font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Rectangle { width: 1; height: 28; color: Theme.border; anchors.verticalCenter: parent.verticalCenter }
+
+                StatusItem {
+                    label: "飞控链路"
+                    value: SerialPortManager.isPortOpen ? "已连接" : "未连接"
+                    dotColor: SerialPortManager.isPortOpen ? Theme.success : Theme.idle
+                }
+                StatusItem {
+                    label: "点火链路"
+                    value: SerialPortManagerFire.isPortOpen ? "已连接" : "未连接"
+                    dotColor: SerialPortManagerFire.isPortOpen ? Theme.success : Theme.idle
+                }
+                StatusItem {
+                    label: "RTK"
+                    value: rtkStateText
+                    dotColor: rtkStateColor
+                }
+                StatusItem {
+                    property int sats: parseInt(positionDisplay.satellites)
+                    label: "卫星"
+                    value: positionDisplay.satellites
+                    dotColor: isNaN(sats) ? Theme.idle
+                            : sats >= 10 ? Theme.success
+                            : sats >= 6 ? Theme.warning : Theme.danger
+                }
+                StatusItem {
+                    label: "电压"
+                    value: positionDisplay.voltage === "N/A" ? "N/A" : positionDisplay.voltage + " V"
+                    dotColor: positionDisplay.voltage === "N/A" ? Theme.idle : Theme.accent
+                }
+            }
+
+            Row {
+                anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+                spacing: 12
+
+                Label {
+                    text: "当前飞机"
+                    color: Theme.textMuted
+                    font.pixelSize: 13
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                ComboBox {
+                    id: aircraftIdComboBox
+                    font.pixelSize: 14
+                    width: 96
+                    anchors.verticalCenter: parent.verticalCenter
+                    model: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+                    currentIndex: 0
+                    displayText: "#" + currentText
+                    onCurrentTextChanged: {
+                        MAVLinkParser.setSelectedSystemId(parseInt(currentText))
+                    }
+                    Component.onCompleted: {
+                        MAVLinkParser.setSelectedSystemId(parseInt(currentText))
+                    }
+                }
+                Button {
+                    text: "链路设置"
+                    font.pixelSize: 14
+                    highlighted: connectionPopup.opened
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: connectionPopup.opened ? connectionPopup.close() : connectionPopup.open()
+                }
+            }
+        }
+
+        // ============ 链路设置弹窗（串口） ============
+        Popup {
+            id: connectionPopup
+            x: parent.width - width - 16
+            y: topBar.height + 8
+            padding: 16
+            background: Rectangle {
+                radius: Theme.radius
+                color: Theme.panelSolid
+                border.color: Theme.border
+            }
+
+            Column {
+                spacing: 12
+
+                Label { text: "链路设置"; font.pixelSize: 15; font.bold: true }
+
+                // 飞机串口部分
+                Row {
+                    spacing: 8
+                    Label {
+                        text: "飞控串口"
+                        width: 64
+                        font.pixelSize: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    ComboBox {
+                        id: serialportComboBox
+                        font.pixelSize: 14
+                        width: 120
+                        model: SerialPortManager.availablePorts
+                    }
+                    ComboBox {
+                        id: baudComboBox
+                        font.pixelSize: 14
+                        width: 110
+                        model: ["9600", "57600", "115200"]
+                    }
+                    Button {
+                        id: btnAirplane
+                        text: SerialPortManager.buttonText
+                        font.pixelSize: 14
+                        width: 100
+                        Material.background: SerialPortManager.isPortOpen ? Theme.danger : Theme.success
+                        onClicked: {
+                            SerialPortManager.togglePort(serialportComboBox.currentText, baudComboBox.currentText)
+                        }
+                    }
+                }
+
+                // 点火串口部分
+                Row {
+                    spacing: 8
+                    Label {
+                        text: "点火串口"
+                        width: 64
+                        font.pixelSize: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    ComboBox {
+                        id: serialportComboBoxFire
+                        font.pixelSize: 14
+                        width: 120
+                        model: SerialPortManagerFire.availablePorts
+                    }
+                    ComboBox {
+                        id: baudComboBoxFire
+                        font.pixelSize: 14
+                        width: 110
+                        model: ["9600", "57600", "115200"]
+                    }
+                    Button {
+                        id: btnIgnition
+                        text: SerialPortManagerFire.buttonText
+                        font.pixelSize: 14
+                        width: 100
+                        Material.background: SerialPortManagerFire.isPortOpen ? Theme.danger : Theme.success
+                        onClicked: {
+                            SerialPortManagerFire.togglePort(serialportComboBoxFire.currentText, baudComboBoxFire.currentText)
+                        }
+                    }
+                }
+
+                Label {
+                    text: "波特率需与数传/点火模块一致"
+                    font.pixelSize: 12
+                    color: Theme.textFaint
+                }
+            }
+        }
+
+        // ============ 左侧工具栏 ============
         Rectangle {
             anchors {
                 left: parent.left
-                verticalCenter: parent.verticalCenter
-                leftMargin: 10
+                top: topBar.bottom
+                leftMargin: 12
+                topMargin: 16
             }
             width: leftButtonColumn.implicitWidth + 16
             height: leftButtonColumn.implicitHeight + 16
@@ -995,7 +1202,7 @@ Window {
                 spacing: 4
 
                 Button {
-                    width: 120
+                    width: 104
                     text: "单机控制"
                     font.pixelSize: 15
                     highlighted: singleControlDrawer.opened
@@ -1006,7 +1213,7 @@ Window {
                     }
                 }
                 Button {
-                    width: 120
+                    width: 104
                     text: "多机控制"
                     font.pixelSize: 15
                     highlighted: formationDrawer.opened
@@ -1017,7 +1224,7 @@ Window {
                     }
                 }
                 Button {
-                    width: 120
+                    width: 104
                     text: "动态编队"
                     font.pixelSize: 15
                     highlighted: pathPlanningDrawer.opened
@@ -1027,9 +1234,10 @@ Window {
                         pathPlanningDrawer.open()
                     }
                 }
+                Rectangle { width: 104; height: 1; color: Theme.border }
                 Button {
-                    width: 120
-                    text: "连接 RTK"
+                    width: 104
+                    text: "RTK 设置"
                     font.pixelSize: 15
                     flat: true
                     onClicked: rtkConfigWindow.open()
@@ -1037,42 +1245,19 @@ Window {
             }
         }
 
-        // 姿态显示控件
-        AttitudeIndicator {
-            id: attitudeIndicator
-            width: 200
-            height: 200
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            roll: 0
-            pitch: 0
-            yaw: 0
-            altitude: 0
-
-            function updateAttitude(sysid, roll, pitch, yaw) {
-                attitudeIndicator.roll = roll
-                attitudeIndicator.pitch = pitch
-                attitudeIndicator.yaw = yaw
-            }
-        }
-
-        // 经纬度、海拔、电压显示控件（位于仪表盘右侧）
+        // ============ 左下仪表区：姿态仪 + 遥测数值 ============
         Rectangle {
-            anchors.fill: positionDisplay
-            anchors.margins: -10
+            id: positionDisplay
+            anchors {
+                left: parent.left
+                bottom: parent.bottom
+                margins: 16
+            }
+            width: instrumentRow.implicitWidth + 24
+            height: instrumentRow.implicitHeight + 24
             radius: Theme.radius
             color: Theme.panel
             border.color: Theme.border
-        }
-        Column {
-            id: positionDisplay
-            anchors {
-                left: attitudeIndicator.right
-                bottom: attitudeIndicator.bottom
-                leftMargin: 20
-                bottomMargin: 10
-            }
-            spacing: 4
 
             property string voltage: "N/A"
             property string latitude: "N/A"
@@ -1081,154 +1266,61 @@ Window {
             property string relativeAltitude: "N/A"
             property string satellites: "N/A"
 
-            Label {
-                text: "卫星数量: " + positionDisplay.satellites
-                font.pixelSize: 14
-            }
-            Label {
-                text: "电压: " + positionDisplay.voltage
-                font.pixelSize: 14
-            }
-            Label {
-                text: "纬度: " + positionDisplay.latitude
-                font.pixelSize: 14
-            }
-            Label {
-                text: "经度: " + positionDisplay.longitude
-                font.pixelSize: 14
-            }
-            Label {
-                text: "海拔: " + positionDisplay.altitude
-                font.pixelSize: 14
-            }
-            Label {
-                text: "对地高度: " + positionDisplay.relativeAltitude
-                font.pixelSize: 14
+            Row {
+                id: instrumentRow
+                anchors.centerIn: parent
+                spacing: 20
+
+                // 姿态显示控件
+                AttitudeIndicator {
+                    id: attitudeIndicator
+                    width: 180
+                    height: 180
+                    roll: 0
+                    pitch: 0
+                    yaw: 0
+                    altitude: 0
+
+                    function updateAttitude(sysid, roll, pitch, yaw) {
+                        attitudeIndicator.roll = roll
+                        attitudeIndicator.pitch = pitch
+                        attitudeIndicator.yaw = yaw
+                    }
+                }
+
+                GridLayout {
+                    anchors.verticalCenter: parent.verticalCenter
+                    columns: 3
+                    columnSpacing: 28
+                    rowSpacing: 16
+
+                    TelemetryValue { label: "海拔"; value: positionDisplay.altitude; unit: "m" }
+                    TelemetryValue { label: "对地高度"; value: positionDisplay.relativeAltitude; unit: "m" }
+                    TelemetryValue { label: "电压"; value: positionDisplay.voltage; unit: "V" }
+                    TelemetryValue { label: "卫星数量"; value: positionDisplay.satellites }
+                    TelemetryValue { label: "纬度"; value: positionDisplay.latitude }
+                    TelemetryValue { label: "经度"; value: positionDisplay.longitude }
+                }
             }
         }
 
-        // 串口、飞机ID设置区域
+        // ============ 右下任务时间轴：计时器及编队任务 ============
         Rectangle {
-            anchors.fill: connectionPanel
-            anchors.margins: -10
+            id: timerItem
+            anchors {
+                right: parent.right
+                bottom: parent.bottom
+                margins: 16
+            }
+            width: missionColumn.implicitWidth + 24
+            height: missionColumn.implicitHeight + 24
             radius: Theme.radius
             color: Theme.panel
             border.color: Theme.border
-        }
-        Column {
-            id: connectionPanel
-            spacing: 10
-            anchors {
-                top: parent.top
-                left: parent.left
-                topMargin: 20
-                leftMargin: 20
-            }
-
-            // 飞机串口部分
-            Row {
-                spacing: 8
-                Label {
-                    text: "飞机串口:"
-                    font.pixelSize: 14
-                }
-                ComboBox {
-                    id: serialportComboBox
-                    font.pixelSize: 14
-                    width: 120
-                    model: SerialPortManager.availablePorts
-                }
-                Label {
-                    text: "波特率:"
-                    font.pixelSize: 14
-                }
-                ComboBox {
-                    id: baudComboBox
-                    font.pixelSize: 14
-                    width: 120
-                    model: ["9600", "57600", "115200"]
-                }
-                Button {
-                    id: btnAirplane
-                    text: SerialPortManager.buttonText
-                    font.pixelSize: 14
-                    width: 100
-                    padding: 6
-                    Material.background: SerialPortManager.isPortOpen ? Theme.danger : Theme.success
-                    onClicked: {
-                        SerialPortManager.togglePort(serialportComboBox.currentText, baudComboBox.currentText)
-                    }
-                }
-            }
-
-            // 点火串口部分
-            Row {
-                spacing: 8
-                Label {
-                    text: "点火串口:"
-                    font.pixelSize: 14
-                }
-                ComboBox {
-                    id: serialportComboBoxFire
-                    font.pixelSize: 14
-                    width: 120
-                    model: SerialPortManagerFire.availablePorts
-                }
-                Label {
-                    text: "波特率:"
-                    font.pixelSize: 14
-                }
-                ComboBox {
-                    id: baudComboBoxFire
-                    font.pixelSize: 14
-                    width: 120
-                    model: ["9600", "57600", "115200"]
-                }
-                Button {
-                    id: btnIgnition
-                    text: SerialPortManagerFire.buttonText
-                    font.pixelSize: 14
-                    width: 100
-                    padding: 6
-                    Material.background: SerialPortManagerFire.isPortOpen ? Theme.danger : Theme.success
-                    onClicked: {
-                        SerialPortManagerFire.togglePort(serialportComboBoxFire.currentText, baudComboBoxFire.currentText)
-                    }
-                }
-            }
-
-            // 飞机ID选择
-            Row {
-                spacing: 8
-                Label {
-                    text: "飞机ID:"
-                    font.pixelSize: 14
-                }
-                ComboBox {
-                    id: aircraftIdComboBox
-                    font.pixelSize: 14
-                    width: 120
-                    model: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
-                    currentIndex: 0
-                    onCurrentTextChanged: {
-                        MAVLinkParser.setSelectedSystemId(parseInt(currentText))
-                    }
-                    Component.onCompleted: {
-                        MAVLinkParser.setSelectedSystemId(parseInt(currentText))
-                    }
-                }
-            }
-        }
-
-        // 计时器及编队任务显示/添加区域
-        Item {
-            id: timerItem
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 30
 
             // 记录累计时间（秒）
             property double elapsedTime: 0
+            property bool expanded: true
 
             Timer {
                 id: timer
@@ -1258,119 +1350,123 @@ Window {
                 }
             }
 
-            Rectangle {
-                anchors.fill: timerPanel
-                anchors.margins: -12
-                radius: Theme.radius
-                color: Theme.panel
-                border.color: Theme.border
-            }
-
             Column {
-                id: timerPanel
+                id: missionColumn
                 anchors.centerIn: parent
                 spacing: 10
 
-                // 第一行：计时文本、开始/暂停按钮、任务名称输入和添加任务按钮
+                // 标题行：计时文本、继续/暂停/重置、折叠
                 Row {
-                    spacing: 20
+                    spacing: 12
+                    Label {
+                        text: "任务时间轴"
+                        font.pixelSize: 15; font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                     Label {
                         id: timerDisplay
-                        text: timerItem.elapsedTime.toFixed(3)
-                        font.pixelSize: 28
+                        width: 130
+                        text: timerItem.elapsedTime.toFixed(3) + " s"
+                        font.pixelSize: 26
                         font.family: Theme.mono
                         color: timer.running ? Theme.accent : Theme.text
-                        horizontalAlignment: Text.AlignHCenter
+                        horizontalAlignment: Text.AlignRight
+                        anchors.verticalCenter: parent.verticalCenter
                     }
-                    Row {
-                        spacing: 20
-                        Button {
-                            text: "继续"
-                            font.pixelSize: 16
-                            onClicked: { timer.running = true }
-                        }
-                        Button {
-                            text: "暂停"
-                            font.pixelSize: 16
-                            onClicked: { timer.running = false }
-                        }
-                        Button {
-                            text: "重置"
-                            font.pixelSize: 16
-                            onClicked: { timer.running = false
-                                timerItem.elapsedTime = 0
-                            }
+                    Button {
+                        text: "继续"
+                        font.pixelSize: 15
+                        highlighted: true
+                        onClicked: { timer.running = true }
+                    }
+                    Button {
+                        text: "暂停"
+                        font.pixelSize: 15
+                        onClicked: { timer.running = false }
+                    }
+                    Button {
+                        text: "重置"
+                        font.pixelSize: 15
+                        flat: true
+                        onClicked: { timer.running = false
+                            timerItem.elapsedTime = 0
                         }
                     }
-                    Row {
-                        spacing: 10
-                        TextField {
-                            id: formationTaskNameField
-                            width: 100
-                            placeholderText: "编队任务"
-                            font.pixelSize: 14
-                        }
-                        TextField {
-                            id: triggerTimeField
-                            width: 100
-                            placeholderText: "触发时间(秒)"
-                            font.pixelSize: 14
-                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        }
-                        Button {
-                            text: "添加编队任务"
-                            font.pixelSize: 16
-                            onClicked: {
-                                var mode    = formationModeComboBox.currentText
-                                var spacing = parseFloat(formationSpacingField.text)
-                                var speed   = parseFloat(formationSpeedField.text)
-                                var yaw     = parseFloat(formationHeadingField.text)
-                                var triggerTime = parseFloat(triggerTimeField.text)
+                    ToolButton {
+                        text: timerItem.expanded ? "▾" : "▸"
+                        font.pixelSize: 18
+                        onClicked: timerItem.expanded = !timerItem.expanded
+                    }
+                }
 
-                                if (isNaN(yaw))          yaw = 0
-                                if (isNaN(spacing))      spacing = 10
-                                if (isNaN(speed))        speed = 0.5
-                                if (isNaN(triggerTime))  triggerTime = 0
+                // 添加编队任务
+                Row {
+                    spacing: 10
+                    visible: timerItem.expanded
+                    TextField {
+                        id: formationTaskNameField
+                        width: 140
+                        placeholderText: "编队任务名称"
+                        font.pixelSize: 14
+                    }
+                    TextField {
+                        id: triggerTimeField
+                        width: 120
+                        placeholderText: "触发时间(秒)"
+                        font.pixelSize: 14
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    }
+                    Button {
+                        text: "添加编队任务"
+                        font.pixelSize: 15
+                        onClicked: {
+                            var mode    = formationModeComboBox.currentText
+                            var spacing = parseFloat(formationSpacingField.text)
+                            var speed   = parseFloat(formationSpeedField.text)
+                            var yaw     = parseFloat(formationHeadingField.text)
+                            var triggerTime = parseFloat(triggerTimeField.text)
 
-                                var task = {
-                                    name: formationTaskNameField.text || "无名称",
-                                    mode: mode,
-                                    spacing: spacing,
-                                    speed: speed,
-                                    yaw: yaw,
-                                    triggerTime: triggerTime,
-                                    done: false
-                                }
-                                formationTasks.push(task)
-                                console.log("添加编队任务:", JSON.stringify(task))
-                                updateFormationTaskListText()
-                                formationTaskNameField.text = ""
-                                triggerTimeField.text = ""  // 清空触发时间
+                            if (isNaN(yaw))          yaw = 0
+                            if (isNaN(spacing))      spacing = 10
+                            if (isNaN(speed))        speed = 0.5
+                            if (isNaN(triggerTime))  triggerTime = 0
+
+                            var task = {
+                                name: formationTaskNameField.text || "无名称",
+                                mode: mode,
+                                spacing: spacing,
+                                speed: speed,
+                                yaw: yaw,
+                                triggerTime: triggerTime,
+                                done: false
                             }
+                            formationTasks.push(task)
+                            console.log("添加编队任务:", JSON.stringify(task))
+                            updateFormationTaskListText()
+                            formationTaskNameField.text = ""
+                            triggerTimeField.text = ""  // 清空触发时间
                         }
                     }
                 }
-                // 新增一行：保存、加载、清除任务按钮
+
+                // 保存、加载、清除任务按钮
                 Row {
                     spacing: 10
+                    visible: timerItem.expanded
                     Button {
                         text: "保存任务"
-                        onClicked: {
-                            saveFileDialog.open()
-
-                        }
+                        flat: true
+                        onClicked: saveFileDialog.open()
                     }
-
-
                     Button {
                         text: "加载任务"
-                        onClicked: {
-                            loadFileDialog.open()
-
-                        }
+                        flat: true
+                        onClicked: loadFileDialog.open()
                     }
                     Button {
                         text: "清除任务"
+                        flat: true
+                        Material.foreground: Theme.danger
                         onClicked: {
                             formationTaskList.text = ""
                             formationTasks = []  // 如果你有保存任务列表的数组，也一起清除
@@ -1379,10 +1475,11 @@ Window {
                     }
                 }
 
-                // 第二行：任务列表显示，使用 Rectangle 包裹 ScrollView 实现半透明背景效果
+                // 任务列表
                 Rectangle {
-                    width: 600
-                    height: 200
+                    visible: timerItem.expanded
+                    width: 560
+                    height: 140
                     color: Theme.input
                     radius: 6
                     border.color: Theme.border
@@ -1393,6 +1490,7 @@ Window {
                             width: parent.width
                             height: parent.height
                             readOnly: true
+                            placeholderText: "暂无编队任务"
                             wrapMode: TextEdit.WrapAnywhere
                             font.pixelSize: 14
                         }
@@ -1410,7 +1508,7 @@ Window {
             textContent += "任务" + (i + 1) + ": " +
                            t.name + " 模式：" + t.mode + "  " +
                            "间距：" + t.spacing + "  " +
-                           "速+-度：" + t.speed + "  " +
+                           "速度：" + t.speed + "  " +
                            "角度：" + t.yaw + "  " +
                            "触发时间：" + String(t.triggerTime) + "秒\n"
         }
