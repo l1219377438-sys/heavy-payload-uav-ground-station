@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # TextToSpeech is optional: it is not included in every Qt installation.
 # The application supplies a no-op QML-compatible fallback when unavailable.
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick SerialPort WebEngineQuick Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick SerialPort WebEngineQuick Network Svg)
 find_package(Qt6TextToSpeech QUIET CONFIG)
 
 
@@ -24,6 +24,10 @@ qt_add_executable(apprebulid
 
 qt_add_resources(apprebulid map_page PREFIX "/map" FILES gaode.html)
 qt_add_resources(apprebulid controls_style PREFIX "/" FILES qtquickcontrols2.conf)
+
+# 界面图标（SVG，运行时通过 qrc:/icons/xxx.svg 引用）
+file(GLOB APP_ICON_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS icons/*.svg)
+qt_add_resources(apprebulid app_icons PREFIX "/" FILES ${APP_ICON_FILES})
 
 qt_add_qml_module(apprebulid
     URI rebulid
@@ -56,7 +60,7 @@ set_target_properties(apprebulid PROPERTIES
 target_link_libraries(apprebulid
     PRIVATE Qt6::Quick Qt6::SerialPort Qt6::Network
 )
-target_link_libraries(apprebulid PRIVATE Qt6::Quick Qt6::WebEngineQuick)
+target_link_libraries(apprebulid PRIVATE Qt6::Quick Qt6::WebEngineQuick Qt6::Svg)
 
 if(TARGET Qt6::TextToSpeech)
     target_link_libraries(apprebulid PRIVATE Qt6::TextToSpeech)

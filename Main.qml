@@ -2,7 +2,7 @@
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
 import QtWebEngine 1.9
-import Qt.labs.platform 1.1
+import Qt.labs.platform 1.1 as Platform
 import QtQuick.Layouts 1.15   // 放在文件头部
 import TextToSpeech 1.0  // 引入 QtSpeech 模块
 import QtWebChannel 1.0
@@ -17,11 +17,49 @@ import ShowAttitude 1.0
 
 Window {
     visible: true
+    id: root
     width: 1280
     height: 800
+    minimumWidth: 1024
+    minimumHeight: 640
     color: Theme.background
     title: qsTr("无人机烟花地面站")
     property var missionList: []    // 存放所有待上传的航点
+    // missionList 是 JS 数组，push 不会触发绑定，用计数驱动按钮状态
+    property int missionCount: 0
+
+    // 窄窗口时收紧布局（仪表区隐藏经纬度、任务面板变窄）
+    readonly property bool compact: width < 1360
+    // 抽屉可用高度：顶部状态栏以下，留出上下边距
+    readonly property real drawerMaxHeight: height - 56 - 32
+
+    // ============ 操作反馈：底部提示条 ============
+    function showToast(message, level) {
+        toast.text = message
+        toast.level = level || "info"
+        toast.opacity = 1
+        toastTimer.restart()
+    }
+
+    // ============ 危险操作二次确认 ============
+    function confirmAction(title, message, action) {
+        confirmDialog.title = title
+        confirmDialog.message = message
+        confirmDialog.action = action
+        confirmDialog.open()
+    }
+
+    // 串口未打开时阻止发送指令并提示
+    function requireLink() {
+        if (SerialPortManager.isPortOpen)
+            return true
+        showToast("飞控串口未打开，请先在“链路设置”中连接", "error")
+        return false
+    }
+
+    function currentSystemId() {
+        return parseInt(aircraftIdComboBox.currentText)
+    }
 
     RtkConfigWindow { id: rtkConfigWindow }
 
@@ -44,9 +82,11 @@ Window {
             rtkStateColor = Theme.danger
         }
 
-        function onRtkDataReady(data) {
-            // data 是 ArrayBuffer
-            console.log("[UI] 收到 RTCM 数据，长度=", data.byteLength)
+        function onDisconnected() {
+            if (rtkStateText !== "错误") {
+                rtkStateText = "已断开"
+                rtkStateColor = Theme.warning
+            }
         }
     }
 
@@ -155,10 +195,10 @@ Window {
 
 
     // 保存文件对话框（QML FileDialog）
-    FileDialog {
+    Platform.FileDialog {
         id: saveFileDialog
         title: "保存任务"
-        fileMode: FileDialog.SaveFile
+        fileMode: Platform.FileDialog.SaveFile
         nameFilters: ["Text files (*.txt)", "All files (*)"]
         onAccepted: {
             var path = file
@@ -187,10 +227,10 @@ Window {
 
 
     // 加载文件对话框（QML FileDialog）
-    FileDialog {
+    Platform.FileDialog {
         id: loadFileDialog
         title: "加载任务"
-        fileMode: FileDialog.OpenFile
+        fileMode: Platform.FileDialog.OpenFile
         nameFilters: ["Text files (*.txt)", "All files (*)"]
         onAccepted: {
             var path = file
@@ -345,6 +385,7 @@ Window {
 
                 Button {
                     text: "生成并上传 4-2-1-3-5 波浪航点"
+                    icon.source: "qrc:/icons/wave.svg"
                     onClicked: {
                         /* 读取参数 */
                         var A = parseFloat(amplitudeField.text)
@@ -374,6 +415,7 @@ Window {
 
                 Button {
                     text: "全部开始任务"
+                    icon.source: "qrc:/icons/play.svg"
                     onClicked: {
                         var ids = [4, 2, 1, 3, 5]
                         for (var i = 0; i < ids.length; ++i)
@@ -401,9 +443,9 @@ Window {
     // 右侧抽屉：单机控制
     Drawer {
         id: singleControlDrawer
-        width: 220
-        height: singleControlContent.implicitHeight + 40
-        y: parent.height/2 - height/2
+        width: 240
+        height: Math.min(singleControlContent.implicitHeight + 32, drawerMaxHeight)
+        y: 56 + 16
         edge: Qt.RightEdge
         modal: false
         interactive: true
@@ -415,11 +457,16 @@ Window {
             color: Theme.panel
         }
 
-        contentItem: Column {
+        // 内容超出窗口高度时可滚动
+        contentItem: ScrollView {
+            clip: true
+            contentWidth: availableWidth
+            padding: 16
+
+        Column {
             id: singleControlContent
-            anchors.fill: parent
-            anchors.margins: 10
-            spacing: 15
+            width: parent.width
+            spacing: 12
 
             // 起飞高度输入
             Row {
@@ -438,53 +485,71 @@ Window {
                 }
             }
 
-            // 起飞、降落、上锁按钮
-            Row {
-                spacing: 10
+            // 起飞、降落、上锁、模式切换（2×2 网格，带图标；串口未开时提示，危险操作二次确认）
+            Grid {
+                columns: 2
+                spacing: 8
                 Button {
+                    width: 96
                     text: "起飞"
-                    font.pixelSize: 16
-                    padding: 8
+                    icon.source: "qrc:/icons/takeoff.svg"
+                    font.pixelSize: 15
+                    highlighted: true
                     onClicked: {
-                        var systemId = parseInt(aircraftIdComboBox.currentText)
+                        if (!requireLink()) return
+                        var systemId = currentSystemId()
                         var altitude = parseFloat(takeoffAltitudeField.text)
-                        if (!isNaN(systemId) && !isNaN(altitude)) {
+                        if (isNaN(altitude) || altitude <= 0) {
+                            showToast("起飞高度无效，请输入大于 0 的数值", "error")
+                            return
+                        }
+                        confirmAction("确认起飞", systemId + " 号机将起飞到 " + altitude + " 米。", function() {
                             DroneController.takeoff(systemId, altitude)
                             console.log("发送起飞指令，ID:", systemId, "高度:", altitude)
-                            var speakText = "起飞，高度， " + altitude + " 米"
-                            tts.speak(speakText)  // 播放语音
-                        } else {
-                            console.log("起飞指令参数非法")
-                        }
+                            tts.speak("起飞，高度， " + altitude + " 米")
+                            showToast(systemId + " 号机起飞指令已发送", "success")
+                        })
                     }
                 }
                 Button {
+                    width: 96
                     text: "降落"
-                    font.pixelSize: 16
-                    padding: 8
+                    icon.source: "qrc:/icons/land.svg"
+                    font.pixelSize: 15
                     onClicked: {
-                        var systemId = parseInt(aircraftIdComboBox.currentText)
+                        if (!requireLink()) return
+                        var systemId = currentSystemId()
                         DroneController.land(systemId)
                         console.log("发送降落指令，ID:", systemId)
+                        showToast(systemId + " 号机降落指令已发送", "success")
                     }
                 }
                 Button {
+                    width: 96
                     text: "上锁"
-                    font.pixelSize: 16
-                    padding: 8
+                    icon.source: "qrc:/icons/lock.svg"
+                    font.pixelSize: 15
+                    Material.background: Theme.danger
                     onClicked: {
-                        var systemId = parseInt(aircraftIdComboBox.currentText)
-                        DroneController.lockMotors(systemId)
-                        console.log("发送上锁指令，ID:", systemId)
+                        if (!requireLink()) return
+                        var systemId = currentSystemId()
+                        confirmAction("确认上锁", "上锁会立即停转电机。空中执行会导致 " + systemId + " 号机坠落，确认继续？", function() {
+                            DroneController.lockMotors(systemId)
+                            console.log("发送上锁指令，ID:", systemId)
+                            showToast(systemId + " 号机上锁指令已发送", "warning")
+                        })
                     }
                 }
                 Button {
-                    text: "模式切换"
-                    font.pixelSize: 13
-                    padding: 8
+                    width: 96
+                    text: "任务模式"
+                    icon.source: "qrc:/icons/route.svg"
+                    font.pixelSize: 15
                     onClicked: {
-                        var systemId = parseInt(aircraftIdComboBox.currentText)
+                        if (!requireLink()) return
+                        var systemId = currentSystemId()
                         DroneController.switchToMissionMode(systemId)
+                        showToast(systemId + " 号机已请求切换到任务模式", "success")
                     }
                 }
             }
@@ -571,12 +636,12 @@ Window {
                     }
                 }
                 Row {
-                    spacing: 10
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
 
                     Button {
+                        width: 100
                         text: "添加航点"
-                        Layout.fillWidth: true
+                        icon.source: "qrc:/icons/plus.svg"
                         onClicked: {
                             var gcjlat   = parseFloat(waypointLatitudeField.text)
                             var gcjlon   = parseFloat(waypointLongitudeField.text)
@@ -584,13 +649,13 @@ Window {
                             var dwell = parseFloat(waypointDwellField.text)
                             var speed = parseFloat(waypointSpeedField.text)
                             if (isNaN(gcjlat)||isNaN(gcjlon)||isNaN(alt)||isNaN(dwell)||isNaN(speed)) {
-                                console.log("输入无效")
+                                showToast("航点参数不完整：请填写纬度、经度、海拔、停留时间和速度", "error")
                                 return
                             }
 
                             var coord = Coord.gcj02ToWgs84(gcjlat, gcjlon)
                             if (!coord || isNaN(coord.lat) || isNaN(coord.lon)) {
-                                console.log("坐标转换失败")
+                                showToast("坐标转换失败，请检查经纬度", "error")
                                 return
                             }
                             missionList.push({
@@ -605,49 +670,56 @@ Window {
                             })
                             console.log("已添加航点，当前列表长度=", missionList.length)
                             mapMissionDirty = true
+                            missionCount = missionList.length
+                            showToast("已添加航点 " + missionList.length, "success")
                         }
                     }
 
                     Button {
+                        width: 100
                         text: "上传航点"
-                        Layout.fillWidth: true
+                        icon.source: "qrc:/icons/upload.svg"
+                        enabled: missionCount > 0
                         onClicked: {
-                            if (missionList.length === 0) {
-                                console.log("没有航点可上传")
-                                return
-                            }
-                            MissionPlanner.uploadWaypoints(
-                                parseInt(aircraftIdComboBox.currentText),
-                                missionList
-                            )
+                            if (!requireLink()) return
+                            var systemId = currentSystemId()
+                            MissionPlanner.uploadWaypoints(systemId, missionList)
+                            showToast("正在向 " + systemId + " 号机上传 " + missionList.length + " 个航点", "info")
                         }
                     }
                 }
 
                 // 第二行：下载航点 & 清除航点
                 Row {
-                    spacing: 10
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
 
                     Button {
+                        width: 100
                         text: "下载航点"
-                        Layout.fillWidth: true
+                        icon.source: "qrc:/icons/download.svg"
                         onClicked: {
-                            MissionPlanner.downloadWaypoints(
-                                parseInt(aircraftIdComboBox.currentText)
-                            )
+                            if (!requireLink()) return
+                            MissionPlanner.downloadWaypoints(currentSystemId())
+                            showToast("正在从 " + currentSystemId() + " 号机下载航点", "info")
                         }
                     }
 
                     Button {
+                        width: 100
                         text: "清除航点"
-                        Layout.fillWidth: true
+                        icon.source: "qrc:/icons/delete.svg"
+                        flat: true
+                        Material.foreground: Theme.danger
                         onClicked: {
-                            MissionPlanner.clearWaypoints(
-                                parseInt(aircraftIdComboBox.currentText)
-                            )
-                            missionList = []
-                            mapMissionDirty = true
+                            var systemId = currentSystemId()
+                            confirmAction("清除航点", "将清除 " + systemId + " 号机上的航点任务和本地航点列表，确认继续？", function() {
+                                if (SerialPortManager.isPortOpen)
+                                    MissionPlanner.clearWaypoints(systemId)
+                                missionList = []
+                                missionCount = 0
+                                mapMissionDirty = true
+                                showToast("航点已清除", "success")
+                            })
                         }
                     }
                 }
@@ -656,31 +728,29 @@ Window {
                 Connections {
                     target: MissionPlanner
                     function onDownloadFinished(payload) {
-                        console.log("Downloaded waypoints:", JSON.stringify(payload, null, 2))
                         missionList = payload
+                        missionCount = payload.length
                         mapMissionDirty = true
+                        showToast("已下载 " + payload.length + " 个航点", "success")
                     }
                 }
 
-                // 最下方：开始路径规划任务
-                Button {
-                    text: "开始路径规划任务"
-                    font.pixelSize: 14
-                    padding: 8
-                    onClicked: {
-                        console.log("开始任务，飞机ID=" + aircraftIdComboBox.currentText)
-                    }
+                Label {
+                    text: missionCount > 0 ? "本地航点：" + missionCount + " 个" : "本地暂无航点，可点击地图选取坐标"
+                    font.pixelSize: 12
+                    color: Theme.textMuted
                 }
             }
+        }
         }
     }
 
     // 右侧抽屉：编队/多机控制
     Drawer {
         id: formationDrawer
-        width: 220
-        height: formationContent.implicitHeight + 40
-        y: parent.height/2 - height/2
+        width: 300
+        height: Math.min(formationContent.implicitHeight + 32, drawerMaxHeight)
+        y: 56 + 16
         edge: Qt.RightEdge
         modal: false
         interactive: true
@@ -692,11 +762,16 @@ Window {
             color: Theme.panel
         }
 
-        contentItem: Column {
+        // 内容超出窗口高度时可滚动
+        contentItem: ScrollView {
+            clip: true
+            contentWidth: availableWidth
+            padding: 16
+
+        Column {
             id: formationContent
-            anchors.fill: parent
-            anchors.margins: 10
-            spacing: 15
+            width: parent.width
+            spacing: 12
 
             // 起飞高度输入
             Row {
@@ -715,40 +790,55 @@ Window {
                 }
             }
 
-            // 多机起飞、降落、上锁按钮并排显示
+            // 多机起飞、降落、上锁（串口未开时提示，起飞/上锁二次确认）
             Row {
-                spacing: 10
+                spacing: 8
                 Button {
-                    text: "多机起飞"
-                    font.pixelSize: 13
-                    padding: 8
+                    width: 96
+                    text: "起飞"
+                    icon.source: "qrc:/icons/takeoff.svg"
+                    font.pixelSize: 14
+                    highlighted: true
                     onClicked: {
+                        if (!requireLink()) return
                         var altitude = parseFloat(multiTakeoffAltitude.text)
-                        if (!isNaN(altitude)) {
+                        if (isNaN(altitude) || altitude <= 0) {
+                            showToast("起飞高度无效，请输入大于 0 的数值", "error")
+                            return
+                        }
+                        confirmAction("确认多机起飞", "所有已连接的飞机将起飞到 " + altitude + " 米。", function() {
                             multiController.takeoffAll(altitude)
                             console.log("调用 multiController 进行多机起飞，高度 = " + altitude)
-                        } else {
-                            console.log("多机起飞: 无效的起飞高度")
-                        }
+                            showToast("多机起飞指令已发送", "success")
+                        })
                     }
                 }
                 Button {
-                    text: "多机降落"
-                    font.pixelSize: 13
-                    padding: 8
+                    width: 96
+                    text: "降落"
+                    icon.source: "qrc:/icons/land.svg"
+                    font.pixelSize: 14
                     onClicked: {
+                        if (!requireLink()) return
                         var mode = formationModeComboBox.currentText
-                        Landing.landAllDronesByFormation(multiController, mode, this);
+                        Landing.landAllDronesByFormation(multiController, mode, root)
+                        showToast("按“" + mode + "”顺序执行多机降落", "success")
                     }
                 }
-                Button {
-                    text: "多机上锁"
-                    font.pixelSize: 13
-                    padding: 8
-                    onClicked: {
+            }
+            Button {
+                width: 200
+                text: "全部上锁"
+                icon.source: "qrc:/icons/lock.svg"
+                font.pixelSize: 14
+                Material.background: Theme.danger
+                onClicked: {
+                    if (!requireLink()) return
+                    confirmAction("确认全部上锁", "上锁会立即停转所有飞机的电机。空中执行会导致坠落，确认继续？", function() {
                         multiController.lockAll()
                         console.log("调用 multiController 进行多机上锁")
-                    }
+                        showToast("多机上锁指令已发送", "warning")
+                    })
                 }
             }
 
@@ -935,6 +1025,7 @@ Window {
             }
 
         }
+        }
     }
 
     Connections {
@@ -1083,6 +1174,7 @@ Window {
                 }
                 Button {
                     text: "链路设置"
+                    icon.source: "qrc:/icons/link.svg"
                     font.pixelSize: 14
                     highlighted: connectionPopup.opened
                     anchors.verticalCenter: parent.verticalCenter
@@ -1204,6 +1296,7 @@ Window {
                 Button {
                     width: 104
                     text: "单机控制"
+                    icon.source: "qrc:/icons/drone.svg"
                     font.pixelSize: 15
                     highlighted: singleControlDrawer.opened
                     onClicked: {
@@ -1215,6 +1308,7 @@ Window {
                 Button {
                     width: 104
                     text: "多机控制"
+                    icon.source: "qrc:/icons/formation.svg"
                     font.pixelSize: 15
                     highlighted: formationDrawer.opened
                     onClicked: {
@@ -1226,6 +1320,7 @@ Window {
                 Button {
                     width: 104
                     text: "动态编队"
+                    icon.source: "qrc:/icons/wave.svg"
                     font.pixelSize: 15
                     highlighted: pathPlanningDrawer.opened
                     onClicked: {
@@ -1238,6 +1333,7 @@ Window {
                 Button {
                     width: 104
                     text: "RTK 设置"
+                    icon.source: "qrc:/icons/rtk.svg"
                     font.pixelSize: 15
                     flat: true
                     onClicked: rtkConfigWindow.open()
@@ -1386,17 +1482,20 @@ Window {
                     }
                     Button {
                         text: "继续"
+                        icon.source: "qrc:/icons/play.svg"
                         font.pixelSize: 15
                         highlighted: true
                         onClicked: { timer.running = true }
                     }
                     Button {
                         text: "暂停"
+                        icon.source: "qrc:/icons/pause.svg"
                         font.pixelSize: 15
                         onClicked: { timer.running = false }
                     }
                     Button {
                         text: "重置"
+                        icon.source: "qrc:/icons/reset.svg"
                         font.pixelSize: 15
                         flat: true
                         onClicked: { timer.running = false
@@ -1404,7 +1503,9 @@ Window {
                         }
                     }
                     ToolButton {
-                        text: timerItem.expanded ? "▾" : "▸"
+                        icon.source: timerItem.expanded ? "qrc:/icons/chevron-down.svg" : "qrc:/icons/chevron-up.svg"
+                        ToolTip.visible: hovered
+                        ToolTip.text: timerItem.expanded ? "收起" : "展开"
                         font.pixelSize: 18
                         onClicked: timerItem.expanded = !timerItem.expanded
                     }
@@ -1429,6 +1530,7 @@ Window {
                     }
                     Button {
                         text: "添加编队任务"
+                        icon.source: "qrc:/icons/plus.svg"
                         font.pixelSize: 15
                         onClicked: {
                             var mode    = formationModeComboBox.currentText
@@ -1466,16 +1568,19 @@ Window {
                     visible: timerItem.expanded
                     Button {
                         text: "保存任务"
+                        icon.source: "qrc:/icons/save.svg"
                         flat: true
                         onClicked: saveFileDialog.open()
                     }
                     Button {
                         text: "加载任务"
+                        icon.source: "qrc:/icons/open.svg"
                         flat: true
                         onClicked: loadFileDialog.open()
                     }
                     Button {
                         text: "清除任务"
+                        icon.source: "qrc:/icons/delete.svg"
                         flat: true
                         Material.foreground: Theme.danger
                         onClicked: {
@@ -1509,6 +1614,84 @@ Window {
                 }
             }
         }
+    }
+
+    // ============ 底部提示条 ============
+    Rectangle {
+        id: toast
+        property string text: ""
+        property string level: "info"   // info | success | warning | error
+        z: 100
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 56 + 16
+        width: Math.min(toastRow.implicitWidth + 32, parent.width - 64)
+        height: 40
+        radius: 20
+        color: Theme.panelSolid
+        border.width: 1
+        border.color: level === "error" ? Theme.danger
+                    : level === "warning" ? Theme.warning
+                    : level === "success" ? Theme.success : Theme.accent
+        opacity: 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+
+        Row {
+            id: toastRow
+            anchors.centerIn: parent
+            spacing: 8
+            Rectangle {
+                width: 8; height: 8; radius: 4
+                color: toast.border.color
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Label {
+                text: toast.text
+                font.pixelSize: 14
+                elide: Text.ElideRight
+                width: Math.min(implicitWidth, root.width - 120)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: toast.opacity = 0
+        }
+
+        Timer {
+            id: toastTimer
+            interval: 3000
+            onTriggered: toast.opacity = 0
+        }
+    }
+
+    // ============ 危险操作确认对话框 ============
+    Dialog {
+        id: confirmDialog
+        property string message: ""
+        property var action: null
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(400, root.width - 64)
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        Label {
+            width: parent.width
+            text: confirmDialog.message
+            wrapMode: Text.WordWrap
+            font.pixelSize: 14
+        }
+
+        onAccepted: {
+            var fn = action
+            action = null
+            if (typeof fn === "function")
+                fn()
+        }
+        onRejected: action = null
     }
 
     // 更新任务列表显示文本
